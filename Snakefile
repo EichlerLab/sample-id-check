@@ -21,11 +21,23 @@ command_dict = {}
 command_dict['ONT'] = 'minimap2 -ax map-ont -I 8G -t'
 command_dict['Illumina'] = 'bwa mem -Y -K 100000000 -t'
 command_dict['PacBio'] = 'minimap2 -ax map-hifi -I 8G -t'
+command_dict['HiFi_BAM'] = 'minimap2 -ax map-hifi -I 8G -t'
 
 df = pd.read_csv(MANIFEST, sep="\t", header=0).set_index("ID", drop=True)
 
-def find_fofn(wildcards):
-    return df.loc[wildcards.id, "FOFN"]
+def find_bam(wildcards):
+    if df.loc[wildcards.id, 'TYPE'] == "HiFi_BAM":
+        with open (df.loc[wildcards.id, "READS"]) as fofn:
+            return fofn.read().strip().split("\n")
+    else:
+        return []
+
+def find_reads(wildcards):
+    if df.loc[wildcards.id, 'TYPE'] == "HiFi_BAM":
+        reads = f"converted_fastq/{wildcards.id}.fastq.gz"
+    else:
+        reads = df.loc[wildcards.id, "READS"]
+    return reads
 
 def get_external_counts(wildcards):
     return sorted(list(glob.iglob("ntsm/count_files/external/*.count")))
@@ -83,9 +95,24 @@ rule link_external_count:
                 os.symlink(os.path.abspath(external_count), link_dest_path)
         open(output.link_external_done, "w").close()
         
+rule fastq_convert:
+    input:
+        bam = find_bam,
+    output:
+        fastq = temp("converted_fastq/{id}.fastq.gz"),
+        fai = "converted_fastq/{id}.fastq.gz.fai"
+    threads: 8,
+    resources:
+        mem=16,
+        hrs=72,
+    shell: """
+        samtools fastq {input.bam} | bgzip -@ {threads} > {output.fastq}
+        samtools fqidx {output.fastq}
+        """
+
 rule make_count:
     input:
-        fofn = find_fofn,
+        reads = find_reads,
     output:
         count_file = "ntsm/count_files/{id}.count",
     params:
@@ -97,7 +124,7 @@ rule make_count:
     singularity:
         "docker://eichlerlab/ntsm:1.2.1",
     shell: """
-        ntsmCount -t {threads} -s {params.ref_site} $(cat {input.fofn}) > {output.count_file}
+        ntsmCount -t {threads} -s {params.ref_site} $(cat {input.reads}) > {output.count_file}
         """
 
 rule check_external_links:
@@ -195,7 +222,6 @@ rule get_matched_summary:
                     matched_relate.append(format(row["relate"],".4f"))
             else: # matched sample not found
                 subset_df = ntsm_summary_df[((ntsm_summary_df["sample1"] == sample) | (ntsm_summary_df["sample2"] == sample))] # subset without matching.
-                print (sample, subset_df)
                 closest_row = subset_df.loc[subset_df["relate"].idxmax()] # The highiest relate score result.
                 if closest_row["sample1"] == sample:
                     closest_sample = closest_row["sample2"]
@@ -285,7 +311,7 @@ rule plot_ntsm_summary:
 
 rule map_reads:
     input:
-        fofn = find_fofn,
+        reads = find_reads,
     output:
         bam = "alignment/GRCh38/{id}.bam",
         bai = "alignment/GRCh38/{id}.bam.bai"
@@ -301,7 +327,7 @@ rule map_reads:
     singularity:
         "docker://eichlerlab/align-basics:0.2",
     shell: """
-        {params.command} {threads} {params.aln_params} {params.ref} $(cat {input.fofn}) | samtools view -b - | sambamba sort -t {threads} -o {output.bam} -m {resources.mem}G /dev/stdin
+        {params.command} {threads} {params.aln_params} {params.ref} $(cat {input.reads}) | samtools view -b - | sambamba sort -t {threads} -o {output.bam} -m {resources.mem}G /dev/stdin
         samtools index {output.bam}
         """
 
