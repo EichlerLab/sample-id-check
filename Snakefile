@@ -99,13 +99,14 @@ rule fastq_convert:
     input:
         bam = find_bam,
     output:
-        fastq = temp("converted_fastq/{id}.fastq.gz"),
+        fastq = "converted_fastq/{id}.fastq.gz",
         fai = "converted_fastq/{id}.fastq.gz.fai"
     threads: 8,
     resources:
         mem=16,
         hrs=72,
     shell: """
+        set -euo pipefail
         samtools fastq {input.bam} | bgzip -@ {threads} > {output.fastq}
         samtools fqidx {output.fastq}
         """
@@ -124,7 +125,11 @@ rule make_count:
     singularity:
         "docker://eichlerlab/ntsm:1.2.1",
     shell: """
-        ntsmCount -t {threads} -s {params.ref_site} $(cat {input.reads}) > {output.count_file}
+        if [[ "{input.reads}" == *.fofn ]]; then
+            ntsmCount -t {threads} -s {params.ref_site} $(cat {input.reads}) > {output.count_file}
+        else
+            ntsmCount -t {threads} -s {params.ref_site} {input.reads} > {output.count_file}
+        fi    
         """
 
 rule check_external_links:
@@ -193,6 +198,8 @@ rule get_matched_summary:
         mem=16,
         hrs=4,
     run:
+        import math
+
         compare_only_ext = params.compare_only_ext
         manifest_df = pd.read_csv(MANIFEST, sep="\t", header=0).set_index("ID", drop=True)
         ntsm_summary_df = pd.read_csv(input.ntsm_summary, sep="\t")
@@ -236,11 +243,15 @@ rule get_matched_summary:
                 vbi_warning = "NA"
             else:
                 vbi_dp = vbi_subset.iloc[0]["AVG_DP"]
-                vbi_freemix = vbi_subset.iloc[0]["FREEMIX"]
-                if vbi_freemix >= 0.01:
-                    vbi_warning = "WARNING"
+                vbi_freemix = float(vbi_subset.iloc[0]["FREEMIX"])
+                if math.isnan(vbi_freemix):
+                    vbi_freemix = "NA"
+                    vbi_warning = "NA"
                 else:
-                    vbi_warning = ""
+                    if vbi_freemix >= 0.01:
+                        vbi_warning = "WARNING"
+                    else:
+                        vbi_warning = ""
 
             matched_data.append([sample, ",".join(matched_samples), ",".join(matched_distance), ",".join(matched_relate), vbi_dp, vbi_freemix, vbi_warning])
         matched_df = pd.DataFrame(matched_data, columns = ["ID","MATCHED_SAMPLE","SCORE","RELATE","VBI_AVG_DP","VBI_FREEMIX","VBI_WARNING"])
@@ -327,7 +338,11 @@ rule map_reads:
     singularity:
         "docker://eichlerlab/align-basics:0.2",
     shell: """
-        {params.command} {threads} {params.aln_params} {params.ref} $(cat {input.reads}) | samtools view -b - | sambamba sort -t {threads} -o {output.bam} -m {resources.mem}G /dev/stdin
+        if [[ "{input.reads}" == *.fofn ]]; then
+            {params.command} {threads} {params.aln_params} {params.ref} $(cat {input.reads}) | samtools view -b - | sambamba sort -t {threads} -o {output.bam} -m {resources.mem}G /dev/stdin
+        else
+            {params.command} {threads} {params.aln_params} {params.ref} {input.reads} | samtools view -b - | sambamba sort -t {threads} -o {output.bam} -m {resources.mem}G /dev/stdin
+        fi
         samtools index {output.bam}
         """
 
