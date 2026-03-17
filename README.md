@@ -1,4 +1,4 @@
-# SampleQC
+# Sample-ID-Check
 The Snakemake pipeline integrates NTSM and VerifyBamID to verify sample identity and detect potential contamination in sequencing data.
 
 ## Requirements
