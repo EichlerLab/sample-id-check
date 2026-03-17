@@ -13,6 +13,7 @@ ROTATION_MATRIX = config.get("ROTATION_MATRIX", f"{SNAKEMAKE_DIR}/db_source/huma
 EXTERNAL_COUNTS_DIR = config.get("EXTERNAL_COUNTS_DIR", "")
 COUNT_FILE_EXP = config.get("COUNT_FILE_EXP", "count")
 COMPARE_ONLY_EXT = config.get("COMPARE_ONLY_EXT", False)
+MISMATCH_FLAG = config.get("MISMATCH_FLAG", False)
 ALN_PARAMS = config.get('ALN_PARAMS', '')
 ALN_REF = "/net/eichler/vol28/eee_shared/assemblies/hg38/no_alt/hg38.no_alt.fa" # fixed
 SVDPREFIX = config.get("SVDPREFIX", "/net/eichler/vol26/7200/software/pipelines/vbi-smk/resource_files/finalout.vcf.gz")
@@ -193,7 +194,8 @@ rule get_matched_summary:
         matched_summary = "summary/matched_result.tsv"
     threads: 1,
     params:
-        compare_only_ext = COMPARE_ONLY_EXT
+        compare_only_ext = COMPARE_ONLY_EXT,
+        mismatch_flag = MISMATCH_FLAG,
     resources:
         mem=16,
         hrs=4,
@@ -201,6 +203,7 @@ rule get_matched_summary:
         import math
 
         compare_only_ext = params.compare_only_ext
+        mismatch_flag = params.mismatch_flag
         manifest_df = pd.read_csv(MANIFEST, sep="\t", header=0).set_index("ID", drop=True)
         ntsm_summary_df = pd.read_csv(input.ntsm_summary, sep="\t")
         vbi_summary_df = pd.read_csv(input.all_vbi_summary, sep="\t", usecols=["#SEQ_ID","AVG_DP","FREEMIX"])
@@ -213,6 +216,10 @@ rule get_matched_summary:
             matched_samples = []
             matched_distance = []
             matched_relate = []
+            if mismatch_flag:
+                mismatch_warning = ""
+            else:
+                mismatch_warning = "disabled"
             subset_df = ntsm_summary_df[((ntsm_summary_df["sample1"] == sample) | (ntsm_summary_df["sample2"] == sample)) & (ntsm_summary_df["same"]>0)]
             if not subset_df.empty:
                 for idx,row in subset_df.iterrows():
@@ -237,6 +244,14 @@ rule get_matched_summary:
                 matched_samples = [f"NotFound. Closest:{closest_sample}"]
                 matched_distance = [f"NA. Closest:{closest_row['score']}"]
                 matched_relate = [f"NA. Closest:{closest_row['relate']}"]
+
+            norm_sample_name = sample.upper().replace("GM","NA").split("-")[0]
+            if mismatch_flag:
+                for matched_name in matched_samples:
+                    norm_matched_name = matched_name.upper().replace("GM","NA").split("-")[0]
+                    if not norm_sample_name == norm_matched_name:
+                        mismatch_warning = "MISMATCH"
+
             if vbi_subset.empty:
                 vbi_dp = "NA"
                 vbi_freemix = "NA"
@@ -253,8 +268,8 @@ rule get_matched_summary:
                     else:
                         vbi_warning = ""
 
-            matched_data.append([sample, ",".join(matched_samples), ",".join(matched_distance), ",".join(matched_relate), vbi_dp, vbi_freemix, vbi_warning])
-        matched_df = pd.DataFrame(matched_data, columns = ["ID","MATCHED_SAMPLE","SCORE","RELATE","VBI_AVG_DP","VBI_FREEMIX","VBI_WARNING"])
+            matched_data.append([sample, ",".join(matched_samples), ",".join(matched_distance), ",".join(matched_relate), mismatch_warning, vbi_dp, vbi_freemix, vbi_warning])
+        matched_df = pd.DataFrame(matched_data, columns = ["ID","MATCHED_SAMPLE","SCORE","RELATE","MISMATCH_WARNING","VBI_AVG_DP","VBI_FREEMIX","VBI_WARNING"])
         matched_df.to_csv(output.matched_summary, sep="\t", index=False)
 
 rule plot_ntsm_summary:
