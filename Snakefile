@@ -33,6 +33,12 @@ def find_bam(wildcards):
     else:
         return []
 
+def find_map(wildcards):
+    if df.loc[wildcards.id, 'TYPE'] == 'Illumina':
+        return rules.index_ref.output.ref
+    else:
+        return ALN_REF
+
 def find_reads(wildcards):
     if df.loc[wildcards.id, 'TYPE'] == "HiFi_BAM":
         reads = f"converted_fastq/{wildcards.id}.fastq.gz"
@@ -58,11 +64,13 @@ def check_svd_files(wildcards):
     return [f"{SVDPREFIX}.{x}" for x in ["bed", "mu", "UD", "V"]]
 
 
+
 wildcard_constraints:
     id = r"[^/.]+"
 
 localrules:
     all,
+    index_ref,
     link_external_count,
     check_external_links,
     vbi_summary,
@@ -80,6 +88,21 @@ rule get_all_count_files:
         expand("ntsm/count_files/{id}.count",
             id = df.index,
         ),
+
+checkpoint index_ref:
+    output:
+        ref = 'ref/GRCh38.fa',
+        index = 'ref/GRCh38.fa.fai',
+        bwa_index = 'ref/GRCh38.fa.amb'
+    params:
+        ref = ALN_REF
+    singularity:
+        "docker://eichlerlab/align-basics:0.3",
+    shell: """
+        ln -s $( readlink -f {params.ref} ) {output.ref}
+        samtools faidx {output.ref}
+        bwa index {output.ref}
+    """
 
 rule link_external_count:
     output:
@@ -338,6 +361,7 @@ rule plot_ntsm_summary:
 rule map_reads:
     input:
         reads = find_reads,
+        ref = find_map,
     output:
         bam = "alignment/GRCh38/{id}.bam",
         bai = "alignment/GRCh38/{id}.bam.bai"
@@ -347,23 +371,22 @@ rule map_reads:
         hrs = 96
     threads: 8
     params:
-        ref = ALN_REF,
         command = find_command,
         aln_params = find_aln_params
     singularity:
         "docker://eichlerlab/align-basics:0.2",
     shell: """
         if [[ "{input.reads}" == *.fofn ]]; then
-            {params.command} {threads} {params.aln_params} {params.ref} $(cat {input.reads}) | samtools view -b - | sambamba sort -t {threads} -o {output.bam} -m {resources.mem}G /dev/stdin
+            {params.command} {threads} {params.aln_params} {input.ref} $(cat {input.reads}) | samtools view -b - | sambamba sort -t {threads} -o {output.bam} -m {resources.mem}G /dev/stdin
         else
-            {params.command} {threads} {params.aln_params} {params.ref} {input.reads} | samtools view -b - | sambamba sort -t {threads} -o {output.bam} -m {resources.mem}G /dev/stdin
+            {params.command} {threads} {params.aln_params} {input.ref} {input.reads} | samtools view -b - | sambamba sort -t {threads} -o {output.bam} -m {resources.mem}G /dev/stdin
         fi
         samtools index {output.bam}
         """
 
 rule run_pileup:
     input:
-        ref = ALN_REF,
+        ref = find_map,
         bed = get_bed,
         bam = rules.map_reads.output.bam,
         bai = rules.map_reads.output.bai,
@@ -371,7 +394,7 @@ rule run_pileup:
         pileup="vbi/pileup_files/{id}.pile",
     threads: 1
     params:
-        ref = ALN_REF,
+        ref = find_map,
     resources:
         mem=16,
         hrs=12,
@@ -392,7 +415,7 @@ rule run_vbi:
         hrs=12,
     threads: 8
     params:
-        ref = ALN_REF,
+        ref = find_map,
         svdprefix = SVDPREFIX,
     singularity:
         "docker://eichlerlab/vbi:2.0.1"
