@@ -1,5 +1,5 @@
 MANIFEST: manifest.tab
-EXTERNAL_COUNTS_DIR: /net/eichler/vol28/projects/long_read_archive/nobackups/sharing/EEE_Kinnex/1KG/ntsm_count_files
-SVDPREFIX:  /net/eichler/vol28/home/yjkwon5/nobackups/git_works/sample_qc/db_source/somaliar_snps.vcf.gz
+EXTERNAL_COUNTS_DIR: /net/eichler/vol28/projects/short_read_cohorts/nobackups/1KG/ntsm_count_files
+SVDPREFIX:  /net/eichler/vol28/software/pipelines/sample-id-check/db_source/somaliar_snps.vcf.gz
 COMPARE_ONLY_EXT: True
 MISMATCH_FLAG: True

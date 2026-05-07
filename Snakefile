@@ -89,20 +89,27 @@ rule get_all_count_files:
             id = df.index,
         ),
 
-checkpoint index_ref:
+rule index_ref:
     output:
-        ref = 'ref/GRCh38.fa',
-        index = 'ref/GRCh38.fa.fai',
-        bwa_index = 'ref/GRCh38.fa.amb'
+        ref = "ref/GRCh38.fa",
+        fai = "ref/GRCh38.fa.fai",
+        amb = "ref/GRCh38.fa.amb",
+        ann = "ref/GRCh38.fa.ann",
+        bwt = "ref/GRCh38.fa.bwt",
+        pac = "ref/GRCh38.fa.pac",
+        sa = "ref/GRCh38.fa.sa",
     params:
         ref = ALN_REF
     singularity:
-        "docker://eichlerlab/align-basics:0.3",
+        "docker://eichlerlab/align-basics:0.3"
     shell: """
-        ln -s $( readlink -f {params.ref} ) {output.ref}
+        mkdir -p ref
+        if [[ ! -e {output.ref} ]]; then
+            ln -s $(readlink -f {params.ref}) {output.ref}
+        fi
         samtools faidx {output.ref}
         bwa index {output.ref}
-    """
+        """
 
 rule link_external_count:
     output:
@@ -142,9 +149,9 @@ rule make_count:
         count_file = "ntsm/count_files/{id}.count",
     params:
         ref_site = REF_SITE,
-    threads: 8,
+    threads: 4,
     resources:
-        mem=lambda wildcards, attempt: 4 * attempt,
+        mem=lambda wildcards, attempt: 8 * attempt,
         hrs=12,
     singularity:
         "docker://eichlerlab/ntsm:1.2.1",
