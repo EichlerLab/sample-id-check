@@ -11,6 +11,7 @@ REF_SITE = config.get("REF_SITE", f"{SNAKEMAKE_DIR}/db_source/human_sites_n10.fa
 SITE_CENTER = config.get("SITE_CENTER", f"{SNAKEMAKE_DIR}/db_source/human_sites_center.txt")
 ROTATION_MATRIX = config.get("ROTATION_MATRIX", f"{SNAKEMAKE_DIR}/db_source/human_sites_rotationalMatrix.tsv")
 EXTERNAL_COUNTS_DIR = config.get("EXTERNAL_COUNTS_DIR", "")
+VBI_FLAG_THRESHOLD = config.get("VBI_FLAG_THRESHOLD", 0.01)
 COUNT_FILE_EXP = config.get("COUNT_FILE_EXP", "count")
 COMPARE_ONLY_EXT = config.get("COMPARE_ONLY_EXT", False)
 MISMATCH_FLAG = config.get("MISMATCH_FLAG", False)
@@ -182,7 +183,7 @@ rule get_ntsm_quick_summary:
         external_all_counts = get_external_counts,
     output:
         summary = "summary/ntsm/ntsm_summary.tsv",
-    threads: 4,
+    threads: 16,
     params:
         site_center = SITE_CENTER,
         rotation_matrix = ROTATION_MATRIX,
@@ -205,7 +206,7 @@ rule get_ntsm_all_pairwise_summary:
         external_all_counts = get_external_counts,
     output:
         summary = "summary/ntsm/all_pairwise.tsv",
-    threads: 24,
+    threads: 32,
     resources:
         mem=lambda wildcards, attempt: 2 * attempt,
         hrs=24,
@@ -226,12 +227,14 @@ rule get_matched_summary:
     params:
         compare_only_ext = COMPARE_ONLY_EXT,
         mismatch_flag = MISMATCH_FLAG,
+        vbi_flag_threshold = VBI_FLAG_THRESHOLD
     resources:
         mem=16,
         hrs=4,
     run:
         import math
 
+        vbi_flag_threshold = params.vbi_flag_threshold
         compare_only_ext = params.compare_only_ext
         mismatch_flag = params.mismatch_flag
         manifest_df = pd.read_csv(MANIFEST, sep="\t", header=0).set_index("ID", drop=True)
@@ -246,6 +249,7 @@ rule get_matched_summary:
             matched_samples = []
             matched_distance = []
             matched_relate = []
+            matched_homconcord = []
             if mismatch_flag:
                 mismatch_warning = ""
             else:
@@ -264,6 +268,7 @@ rule get_matched_summary:
                     matched_samples.append(matched_sample)
                     matched_distance.append(format(row["score"],".4f"))
                     matched_relate.append(format(row["relate"],".4f"))
+                    matched_homconcord.append(format(row["homConcord"], ".4f"))
             else: # matched sample not found
                 subset_df = ntsm_summary_df[((ntsm_summary_df["sample1"] == sample) | (ntsm_summary_df["sample2"] == sample))] # subset without matching.
                 closest_row = subset_df.loc[subset_df["relate"].idxmax()] # The highiest relate score result.
@@ -272,8 +277,9 @@ rule get_matched_summary:
                 else:
                     closest_sample = closest_row["sample1"]
                 matched_samples = [f"NotFound. Closest:{closest_sample}"]
-                matched_distance = [f"NA. Closest:{closest_row['score']}"]
-                matched_relate = [f"NA. Closest:{closest_row['relate']}"]
+                matched_distance = [f"NotFound. Closest:{closest_row['score']}"]
+                matched_relate = [f"NotFound. Closest:{closest_row['relate']}"]
+                matched_homconcord = [f"NotFound. Closest:{closest_row['homConcord']}"]
 
             norm_sample_name = sample.upper().replace("GM","NA").split("-")[0]
             if mismatch_flag:
@@ -293,13 +299,13 @@ rule get_matched_summary:
                     vbi_freemix = "NA"
                     vbi_warning = "NA"
                 else:
-                    if vbi_freemix >= 0.01:
+                    if vbi_freemix >= vbi_flag_threshold:
                         vbi_warning = "WARNING"
                     else:
                         vbi_warning = ""
 
-            matched_data.append([sample, ",".join(matched_samples), ",".join(matched_distance), ",".join(matched_relate), mismatch_warning, vbi_dp, vbi_freemix, vbi_warning])
-        matched_df = pd.DataFrame(matched_data, columns = ["ID","MATCHED_SAMPLE","SCORE","RELATE","MISMATCH_WARNING","VBI_AVG_DP","VBI_FREEMIX","VBI_WARNING"])
+            matched_data.append([sample, ",".join(matched_samples), ",".join(matched_distance), ",".join(matched_relate), ",".join(matched_homconcord), mismatch_warning, vbi_dp, vbi_freemix, vbi_warning])
+        matched_df = pd.DataFrame(matched_data, columns = ["ID","MATCHED_SAMPLE","SCORE","RELATE","HOM_CONCORD","MISMATCH_WARNING","VBI_AVG_DP","VBI_FREEMIX","VBI_WARNING"])
         matched_df.to_csv(output.matched_summary, sep="\t", index=False)
 
 rule plot_ntsm_summary:
