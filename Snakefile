@@ -18,6 +18,7 @@ MISMATCH_FLAG = config.get("MISMATCH_FLAG", False)
 ALN_PARAMS = config.get('ALN_PARAMS', '')
 ALN_REF = "/net/eichler/vol28/eee_shared/assemblies/hg38/no_alt/hg38.no_alt.fa" # fixed
 SVDPREFIX = config.get("SVDPREFIX", "/net/eichler/vol26/7200/software/pipelines/vbi-smk/resource_files/finalout.vcf.gz")
+PILEUP_DS = config.get("PILEUP_DS", 8000)
 
 command_dict = {}
 command_dict['ONT'] = 'minimap2 -ax map-ont -I 8G -t'
@@ -29,8 +30,14 @@ df = pd.read_csv(MANIFEST, sep="\t", header=0).set_index("ID", drop=True)
 
 def find_bam(wildcards):
     if df.loc[wildcards.id, 'TYPE'] == "HiFi_BAM":
-        with open (df.loc[wildcards.id, "READS"]) as fofn:
-            return fofn.read().strip().split("\n")
+        reads = df.loc[wildcards.id, "READS"]
+
+        if reads.endswith(".fofn"):
+            with open(reads) as fofn:
+                return fofn.read().strip().split("\n")
+        else:
+            return [reads]
+
     else:
         return []
 
@@ -131,7 +138,7 @@ rule fastq_convert:
     input:
         bam = find_bam,
     output:
-        fastq = "converted_fastq/{id}.fastq.gz",
+        fastq = temp("converted_fastq/{id}.fastq.gz"),
         fai = "converted_fastq/{id}.fastq.gz.fai"
     threads: 8,
     resources:
@@ -376,7 +383,7 @@ rule map_reads:
         reads = find_reads,
         ref = find_map,
     output:
-        bam = "alignment/GRCh38/{id}.bam",
+        bam = temp("alignment/GRCh38/{id}.bam"),
         bai = "alignment/GRCh38/{id}.bam.bai"
     resources:
         mem = 12,
@@ -408,13 +415,14 @@ rule run_pileup:
     threads: 1
     params:
         ref = find_map,
+        ds = PILEUP_DS
     resources:
         mem=16,
         hrs=12,
     singularity:
         "docker://eichlerlab/binf-basics:0.1"
     shell: """
-        samtools mpileup -B -f {input.ref} -l {input.bed} {input.bam} -o {output.pileup}
+        samtools mpileup -B -f {input.ref} -d {params.ds} -l {input.bed} {input.bam} -o {output.pileup}
         """
 
 rule run_vbi:
